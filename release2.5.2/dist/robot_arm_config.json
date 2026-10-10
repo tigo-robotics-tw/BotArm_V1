@@ -1,0 +1,36 @@
+{
+  "dof": 3,
+  "motorMapping": {
+    "0": "0x01",
+    "1": "0x03",
+    "2": "0x04"
+  },
+  "gripperMotorId": "0x06",
+  "jointLimits": [
+    {
+      "min": -180,
+      "max": 180
+    },
+    {
+      "min": -180,
+      "max": 180
+    },
+    {
+      "min": -180,
+      "max": 180
+    }
+  ],
+  "collisionEnabled": true,
+  "minSegmentDistance": 15,
+  "basePosition": {
+    "x": 400,
+    "y": 550
+  },
+  "initialPosition": "left",
+  "gripperReverse": false,
+  "motorReverse": {
+    "1": true
+  },
+  "gripperRangeMin": 0,
+  "gripperRangeMax": 359
+}

@@ -1,0 +1,1396 @@
+<!DOCTYPE html>
+<!--
+Robot Arm Control
+Copyright (C) 2026 BigHead theBit <student15.tigo.robotics@gmail.com>
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+-->
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Robot Arm Control</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            margin: 0;
+            background: #1a1a2e;
+            display: flex;
+            font-family: Arial, sans-serif;
+        }
+        #container { flex: 1; position: relative; }
+        svg { width: 100%; height: 100vh; background: #2d2d44; }
+
+        #controls {
+            width: 350px;
+            background: white;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        h2 { color: #667eea; margin-bottom: 20px; }
+
+        .joint-control {
+            margin: 15px 0;
+            padding: 12px;
+            background: #f5f5f5;
+            border-radius: 8px;
+            border-left: 4px solid #4ecdc4;
+        }
+
+        .joint-control.unmapped {
+            border-left: 4px solid #ffa500;
+        }
+
+        .joint-control label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .motor-info {
+            font-size: 11px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            margin: 5px 0;
+        }
+
+        input[type="number"] {
+            width: 70px;
+            padding: 4px;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+        }
+
+        .value-display {
+            margin-left: 10px;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        button {
+            width: 100%;
+            padding: 12px;
+            margin-top: 10px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            color: white;
+        }
+
+        #send-btn { background: #667eea; }
+        #send-btn:hover { background: #5568d3; }
+
+        #release-btn {
+            background: #ff3b3b;
+            font-weight: bold;
+            font-size: 16px;
+            margin-top: 20px;
+            border: 3px solid #cc0000;
+        }
+        #release-btn:hover {
+            background: #ff0000;
+            transform: scale(1.05);
+        }
+
+        #status {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(255, 107, 107, 0.95);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: bold;
+            font-size: 14px;
+        }
+
+        #status.connected {
+            background: rgba(78, 205, 196, 0.95);
+        }
+
+        #info {
+            position: absolute;
+            top: 70px;
+            left: 20px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 12px;
+            color: #333;
+        }
+
+        #info h3 {
+            color: #667eea;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        #info p { margin: 3px 0; }
+
+        /* SVG elements */
+        .segment {
+            stroke-width: 8;
+            stroke-linecap: round;
+            fill: none;
+        }
+        .segment.mapped { stroke: #4ecdc4; }
+        .segment.unmapped { stroke: #ffa500; }
+        .segment.selected { stroke: #ff6b6b; }
+
+        .joint {
+            fill: white;
+            stroke: #1a1a2e;
+            stroke-width: 2;
+            cursor: pointer;
+            transition: fill 0.2s;
+        }
+        .joint:hover {
+            fill: #e0e0e0;
+        }
+        .joint.base { fill: #667eea; cursor: default; }
+        .joint.base:hover { fill: #667eea; }
+        .joint.selected { fill: #ff6b6b; }
+
+        .end-effector {
+            fill: #ffd93d;
+            stroke: #ff6b6b;
+            stroke-width: 2;
+            cursor: move;
+            transition: stroke-width 0.2s, r 0.2s;
+        }
+        .end-effector:hover {
+            stroke-width: 3;
+            filter: brightness(1.2);
+        }
+        .end-effector.dragging {
+            fill: #ff6b6b;
+            cursor: grabbing;
+        }
+
+        .joint-label {
+            fill: white;
+            font-size: 12px;
+            font-weight: bold;
+            text-anchor: middle;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <svg id="svg" viewBox="0 0 1200 800">
+            <!-- Grid -->
+            <pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse">
+                <path d="M 50 0 L 0 0 0 50" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+            </pattern>
+            <rect width="100%" height="100%" fill="url(#grid)"/>
+
+            <!-- Robot arm -->
+            <g id="arm"></g>
+        </svg>
+
+        <div id="status">WS: Disconnected</div>
+
+        <div id="info">
+            <h3>Controls</h3>
+            <p><strong>Left-Drag Gripper:</strong> Move (free IK)</p>
+            <p><strong>Right-Drag Gripper:</strong> Move (fixed angle)</p>
+            <p><strong>Scroll on Gripper:</strong> Open/close claw</p>
+            <p><strong>Drag Joint:</strong> Reposition joint</p>
+            <p><strong>Keys 1-6:</strong> Select joint</p>
+            <p><strong>Arrows:</strong> Adjust angle (±1°)</p>
+            <p id="end-pos"></p>
+            <p id="gravity-info" style="margin-top: 8px; font-size: 11px; font-weight: bold; color: #667eea; display: none;">
+                <!-- Gravity info will be inserted here -->
+            </p>
+            <p style="margin-top: 8px; font-size: 10px; color: #999;">
+                ⚠️ Collision detection enabled<br>
+                🔒 Joint limits enforced
+            </p>
+        </div>
+    </div>
+
+    <div id="controls">
+        <h2>Robot Arm Control</h2>
+
+        <div style="margin-bottom: 20px; padding: 10px; background: #f0f0f0; border-radius: 5px;">
+            <label><strong>Joints (DOF):</strong></label>
+            <input type="number" id="dof" value="4" min="2" max="6" style="width: 60px; margin: 5px 0;">
+            <button onclick="updateDOF()" style="width: 100%; margin-top: 5px; background: #4ecdc4;">Update</button>
+        </div>
+
+        <h3 style="color: #667eea; font-size: 14px; margin: 15px 0 10px 0;">Mapped Joints → Motors</h3>
+        <div id="mapped-joints"></div>
+
+        <h3 style="color: #ffa500; font-size: 14px; margin: 15px 0 10px 0;">Unmapped Joints (Manual)</h3>
+        <div id="unmapped-joints"></div>
+
+        <h3 style="color: #ffd93d; font-size: 14px; margin: 15px 0 10px 0;">Gripper Control</h3>
+        <div class="joint-control" style="border-left: 4px solid #ffd93d;">
+            <label>Gripper (End Effector Motor)</label>
+            <div class="motor-info">Motor ID: 0x10 (editable in code)</div>
+            <div class="motor-info" style="color: #999;">0° = Closed | 90° = Open</div>
+            <input type="range" id="gripper-slider" min="0" max="90" value="0"
+                   oninput="updateGripper(this.value)">
+            <input type="number" id="gripper-num" min="0" max="90" step="1" value="0"
+                   oninput="updateGripper(this.value)">
+            <span class="value-display" id="gripper-val">0°</span>
+        </div>
+
+        <div style="display: flex; gap: 10px; align-items: center; margin-top: 10px;">
+            <button id="send-btn" onclick="sendToMotors()">Send to Motors</button>
+            <label style="display: flex; align-items: center; gap: 5px; font-size: 12px; cursor: pointer;">
+                <input type="checkbox" id="auto-send-check" onchange="toggleAutoSend()">
+                <span>Auto-send while dragging</span>
+            </label>
+        </div>
+        <button id="release-btn" onclick="releaseAllMotors()" style="margin-top: 10px;">🛑 RELEASE ALL MOTORS</button>
+    </div>
+
+    <script>
+        // Configuration
+        const baseX = 400;  // Center horizontally
+        const baseY = 550;  // Lower on screen (bottom)
+        let dof = 3;
+        let angles = [0, 0, 0, 0, 0, 0, 0, 0];  // Default angles (0° = right in robot coords)
+        let lengths = [120, 100, 80, 60];
+        let motorMapping = {"0": "0x01", "1": "0x03", "2": "0x04"}; // Edit this: joint index -> motor ID
+        let gripperMotorId = '0x06'; // Gripper motor ID
+        let gripperAngle = 0; // Gripper open/close angle (0 = closed, 90 = open)
+        let positionDetected = false; // Track if position has been detected
+
+        // Pan
+        let panOffsetX = 0;
+        let panOffsetY = 0;
+        let isPanning = false;
+        let panStartX = 0;
+        let panStartY = 0;
+
+        let selectedJoint = 0;
+        let isDragging = false;
+        let isDraggingJoint = false;
+        let draggedJointIndex = -1;
+        let isRightDragging = false; // Right-click drag with fixed orientation
+        let targetOrientation = 0; // Target orientation for right-drag
+        let isHoveringGripper = false; // Track if mouse is over gripper
+        let autoSendEnabled = false; // Auto-send to motors while dragging
+        let autoSendThrottle = null; // Throttle timer for auto-send
+
+        // Joint constraints (min/max angles per joint in degrees)
+        let jointLimits = [
+            {min: -135, max: 135},
+            {min: -135, max: 135},
+            {min: -135, max: 135},
+            {min: -135, max: 135},
+            {min: -135, max: 135},
+            {min: -135, max: 135},
+        ];
+
+        // Collision detection settings
+        let collisionEnabled = true;
+        let minSegmentDistance = 15; // Minimum distance between non-adjacent segments
+
+        // WebSocket
+        let ws = null;
+        let wsConnected = false;
+
+        // Apply configuration received from server
+        function applyConfig(config) {
+            console.log('Applying config:', config);
+
+            // Update DOF
+            if (config.dof !== undefined) {
+                dof = config.dof;
+            }
+
+            // Update motor mapping
+            if (config.motorMapping) {
+                motorMapping = config.motorMapping;
+            }
+
+            // Update gripper motor ID
+            if (config.gripperMotorId) {
+                gripperMotorId = config.gripperMotorId;
+            }
+
+            // Update gripper range
+            if (config.gripperRangeMin !== undefined) {
+                let minVal = config.gripperRangeMin;
+                document.getElementById('gripper-slider').min = minVal;
+                document.getElementById('gripper-num').min = minVal;
+                console.log(`[CONFIG] Gripper min set to: ${minVal}`);
+            }
+            if (config.gripperRangeMax !== undefined) {
+                let maxVal = config.gripperRangeMax;
+                document.getElementById('gripper-slider').max = maxVal;
+                document.getElementById('gripper-num').max = maxVal;
+                console.log(`[CONFIG] Gripper max set to: ${maxVal}`);
+            }
+
+            // Update collision settings
+            if (config.collisionEnabled !== undefined) {
+                collisionEnabled = config.collisionEnabled;
+            }
+            if (config.minSegmentDistance !== undefined) {
+                minSegmentDistance = config.minSegmentDistance;
+            }
+
+            // Update joint limits
+            if (config.jointLimits) {
+                jointLimits = config.jointLimits;
+            }
+
+            // Regenerate controls with new config
+            generateControls();
+            draw();
+        }
+
+        // Apply detected positions from server
+        function applyDetectedPosition(data) {
+            console.log('Applying detected positions:', data);
+
+            const positions = data.positions || data;
+            const gravity = data.gravity;
+
+            if (!positions) {
+                console.warn('No positions provided');
+                return;
+            }
+
+            // Convert motor positions to joint angles
+            for (let jointIdx = 0; jointIdx < dof; jointIdx++) {
+                const motorId = motorMapping[jointIdx];
+                if (motorId && positions[motorId] !== undefined) {
+                    // Position is in radians, convert to degrees
+                    const angleDeg = positions[motorId] * 180 / Math.PI;
+                    angles[jointIdx] = angleDeg;
+                    console.log(`Joint ${jointIdx}: motor ${motorId} at ${angleDeg.toFixed(1)}°`);
+                }
+            }
+
+            // Update gripper if present
+            if (gripperMotorId && positions[gripperMotorId] !== undefined) {
+                gripperAngle = positions[gripperMotorId] * 180 / Math.PI;
+                console.log(`Gripper at ${gripperAngle.toFixed(1)}°`);
+            }
+
+            // Sync all UI controls with detected angles
+            for (let i = 0; i < dof; i++) {
+                updateAngle(i, angles[i]);
+            }
+            updateGripper(gripperAngle);
+
+            positionDetected = true;
+
+            // Display gravity direction
+            let statusText = '✓ Position Detected';
+            if (gravity && gravity.direction) {
+                statusText += ' | Gravity: ' + gravity.direction;
+                console.log('Gravity direction:', gravity.direction);
+                console.log('Interpretation:', gravity.interpretation);
+
+                // Update info panel with gravity direction
+                const gravityInfo = document.getElementById('gravity-info');
+                gravityInfo.style.display = 'block';
+                gravityInfo.innerHTML = `
+                    🌍 Gravity: ${gravity.direction}<br>
+                    <span style="font-size: 10px; font-weight: normal; color: #999;">
+                    Reference: Joint ${gravity.reference_joint || '1'} at ${gravity.angle_from_horizontal.toFixed(1)}° from horizontal
+                    </span>
+                `;
+            }
+
+            document.getElementById('status').textContent = statusText;
+            document.getElementById('status').style.background = 'rgba(78, 205, 196, 0.95)';
+
+            setTimeout(() => {
+                if (wsConnected) {
+                    document.getElementById('status').textContent = 'WS: Connected';
+                    document.getElementById('status').style.background = '';
+                }
+            }, 5000);
+
+            draw();
+        }
+
+        function initWebSocket() {
+            try {
+                ws = new WebSocket('ws://localhost:8765');
+
+                ws.onopen = () => {
+                    wsConnected = true;
+                    document.getElementById('status').textContent = 'WS: Connected';
+                    document.getElementById('status').classList.add('connected');
+                    console.log('WebSocket connected');
+
+                    // Request config from server
+                    sendWS('set_config', {});
+                };
+
+                ws.onclose = () => {
+                    wsConnected = false;
+                    document.getElementById('status').textContent = 'WS: Disconnected';
+                    document.getElementById('status').classList.remove('connected');
+                    console.log('WebSocket disconnected');
+                    setTimeout(initWebSocket, 3000);
+                };
+
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    console.log('Server:', data);
+
+                    // Handle config updates from server
+                    if (data.command === 'config_update' && data.config) {
+                        applyConfig(data.config);
+                    }
+
+                    // Handle config response (from set_config request)
+                    if (data.status === 'success' && data.config) {
+                        console.log('Received config from server');
+                        applyConfig(data.config);
+                    }
+
+                    // Handle detected position from server
+                    if (data.command === 'position_detected') {
+                        applyDetectedPosition(data);
+                    }
+                };
+            } catch (error) {
+                console.error('WebSocket error:', error);
+            }
+        }
+
+        function sendWS(command, params = {}) {
+            if (wsConnected && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ command, params }));
+            }
+        }
+
+        // Collision detection - check if segments overlap
+        function checkSelfCollision(positions) {
+            if (!collisionEnabled) return false;
+
+            // Check each pair of non-adjacent segments
+            for (let i = 0; i < positions.length - 1; i++) {
+                for (let j = i + 2; j < positions.length - 1; j++) {
+                    // Don't check adjacent segments
+                    if (Math.abs(i - j) <= 1) continue;
+
+                    let seg1Start = positions[i];
+                    let seg1End = positions[i + 1];
+                    let seg2Start = positions[j];
+                    let seg2End = positions[j + 1];
+
+                    let dist = segmentDistance(seg1Start, seg1End, seg2Start, seg2End);
+                    if (dist < minSegmentDistance) {
+                        return true; // Collision detected
+                    }
+                }
+            }
+            return false;
+        }
+
+        // Calculate minimum distance between two line segments
+        function segmentDistance(p1, p2, p3, p4) {
+            // Calculate distance from point to line segment
+            function pointToSegment(px, py, x1, y1, x2, y2) {
+                let dx = x2 - x1;
+                let dy = y2 - y1;
+                if (dx === 0 && dy === 0) {
+                    return Math.sqrt((px - x1) ** 2 + (py - y1) ** 2);
+                }
+                let t = ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy);
+                t = Math.max(0, Math.min(1, t));
+                let closestX = x1 + t * dx;
+                let closestY = y1 + t * dy;
+                return Math.sqrt((px - closestX) ** 2 + (py - closestY) ** 2);
+            }
+
+            // Check all four point-to-segment distances
+            let d1 = pointToSegment(p3.x, p3.y, p1.x, p1.y, p2.x, p2.y);
+            let d2 = pointToSegment(p4.x, p4.y, p1.x, p1.y, p2.x, p2.y);
+            let d3 = pointToSegment(p1.x, p1.y, p3.x, p3.y, p4.x, p4.y);
+            let d4 = pointToSegment(p2.x, p2.y, p3.x, p3.y, p4.x, p4.y);
+
+            return Math.min(d1, d2, d3, d4);
+        }
+
+        // Draw base anchor/floor
+        function drawBaseAnchor(svg, x, y) {
+            // Draw floor platform
+            const floor = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            floor.setAttribute('x', x - 60);
+            floor.setAttribute('y', y);
+            floor.setAttribute('width', 120);
+            floor.setAttribute('height', 15);
+            floor.setAttribute('fill', '#555');
+            floor.setAttribute('stroke', '#333');
+            floor.setAttribute('stroke-width', '2');
+            floor.setAttribute('rx', '3');
+            svg.appendChild(floor);
+
+            // Draw bolt pattern (anchor points)
+            for (let i = 0; i < 4; i++) {
+                const boltX = x - 45 + (i * 30);
+                const bolt = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                bolt.setAttribute('cx', boltX);
+                bolt.setAttribute('cy', y + 7);
+                bolt.setAttribute('r', '4');
+                bolt.setAttribute('fill', '#999');
+                bolt.setAttribute('stroke', '#666');
+                bolt.setAttribute('stroke-width', '1');
+                svg.appendChild(bolt);
+            }
+
+            // Draw mounting post (vertical support)
+            const post = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            post.setAttribute('x', x - 8);
+            post.setAttribute('y', y - 20);
+            post.setAttribute('width', 16);
+            post.setAttribute('height', 20);
+            post.setAttribute('fill', '#666');
+            post.setAttribute('stroke', '#444');
+            post.setAttribute('stroke-width', '2');
+            svg.appendChild(post);
+
+            // Draw base circle (motor mounting point)
+            const base = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            base.setAttribute('cx', x);
+            base.setAttribute('cy', y);
+            base.setAttribute('r', '12');
+            base.setAttribute('fill', '#777');
+            base.setAttribute('stroke', '#444');
+            base.setAttribute('stroke-width', '2');
+            svg.appendChild(base);
+
+            // Center mark
+            const center = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            center.setAttribute('cx', x);
+            center.setAttribute('cy', y);
+            center.setAttribute('r', '3');
+            center.setAttribute('fill', '#ff6b6b');
+            svg.appendChild(center);
+        }
+
+        // Draw robot arm
+        function draw() {
+            const arm = document.getElementById('arm');
+            arm.innerHTML = '';
+
+            // Apply pan transform to workspace
+            const actualBaseX = baseX + panOffsetX;
+            const actualBaseY = baseY + panOffsetY;
+
+            console.log(`[DEBUG] Drawing: base=(${actualBaseX},${actualBaseY}), angles=[${angles.join(',')}], lengths=[${lengths.join(',')}]`);
+
+            // Draw floor/anchor at base
+            drawBaseAnchor(arm, actualBaseX, actualBaseY);
+
+            // Calculate positions (forward kinematics)
+            let positions = [{x: actualBaseX, y: actualBaseY}];
+            let totalAngle = 0;
+
+            for (let i = 0; i < dof; i++) {
+                totalAngle += angles[i];
+                let rad = totalAngle * Math.PI / 180;
+                let prev = positions[i];
+                // Flip horizontally: negate cos to make 0° point left instead of right
+                positions.push({
+                    x: prev.x - lengths[i] * Math.cos(rad),  // Flipped: - instead of +
+                    y: prev.y - lengths[i] * Math.sin(rad)
+                });
+            }
+
+            // Check for self-collision
+            let hasCollision = checkSelfCollision(positions);
+
+            // Draw segments
+            for (let i = 0; i < positions.length - 1; i++) {
+                let line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('x1', positions[i].x);
+                line.setAttribute('y1', positions[i].y);
+                line.setAttribute('x2', positions[i + 1].x);
+                line.setAttribute('y2', positions[i + 1].y);
+                line.classList.add('segment');
+
+                if (hasCollision) {
+                    line.setAttribute('stroke', '#ff3333');
+                    line.setAttribute('stroke-width', '10');
+                } else if (i === selectedJoint) {
+                    line.classList.add('selected');
+                } else if (i in motorMapping) {
+                    line.classList.add('mapped');
+                } else {
+                    line.classList.add('unmapped');
+                }
+
+                arm.appendChild(line);
+            }
+
+            // Update status with collision warning
+            if (hasCollision && !isDragging) {
+                let statusEl = document.getElementById('status');
+                let oldText = statusEl.textContent;
+                if (!oldText.includes('COLLISION')) {
+                    statusEl.textContent = '⚠️ COLLISION WARNING!';
+                    statusEl.style.background = 'rgba(255, 51, 51, 0.95)';
+                }
+            } else if (!isDragging && wsConnected) {
+                document.getElementById('status').textContent = 'WS: Connected';
+                document.getElementById('status').style.background = '';
+            }
+
+            // Draw joints
+            for (let i = 0; i < positions.length; i++) {
+                let circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                circle.setAttribute('cx', positions[i].x);
+                circle.setAttribute('cy', positions[i].y);
+                circle.setAttribute('r', i === 0 ? 15 : 10);
+                circle.classList.add('joint');
+
+                if (i === 0) {
+                    circle.classList.add('base');
+                } else if (i === selectedJoint + 1) {
+                    circle.classList.add('selected');
+                }
+
+                // Make joints draggable (except base)
+                if (i > 0 && i < positions.length - 1) {
+                    circle.style.cursor = 'move';
+                    circle.onmousedown = (e) => {
+                        e.stopPropagation();
+                        startJointDrag(i);
+                    };
+                } else {
+                    circle.onclick = () => {
+                        if (i > 0) {
+                            selectedJoint = i - 1;
+                            highlightSelected();
+                            draw();
+                        }
+                    };
+                }
+
+                arm.appendChild(circle);
+
+                // Joint label (joints are numbered 1 to dof, base is joint 1)
+                let text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                text.setAttribute('x', positions[i].x);
+                text.setAttribute('y', positions[i].y - 20);
+                text.classList.add('joint-label');
+                text.textContent = i + 1; // Base is 1, second joint is 2, etc.
+                arm.appendChild(text);
+            }
+
+            // End effector with gripper visualization
+            let endPos = positions[positions.length - 1];
+
+            // Calculate end effector orientation (sum of all joint angles)
+            let totalOrientation = 0;
+            for (let i = 0; i < dof; i++) {
+                totalOrientation += angles[i];
+            }
+            let orientRad = totalOrientation * Math.PI / 180;
+
+            // Draw gripper jaws (angle based on gripperAngle: 0=closed, 90=open)
+            let gripperLength = 25;
+            let gripperWidth = 8;
+            let jawAngleRad = (gripperAngle / 90) * (Math.PI / 4); // 0 to 45 degrees based on gripperAngle
+
+            // Left jaw (mirrored display: negate X like the arm segments)
+            let leftJaw = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            leftJaw.setAttribute('x1', endPos.x);
+            leftJaw.setAttribute('y1', endPos.y);
+            leftJaw.setAttribute('x2', endPos.x - gripperLength * Math.cos(orientRad + jawAngleRad));
+            leftJaw.setAttribute('y2', endPos.y - gripperLength * Math.sin(orientRad + jawAngleRad));
+            leftJaw.setAttribute('stroke', '#ffd93d');
+            leftJaw.setAttribute('stroke-width', gripperWidth);
+            leftJaw.setAttribute('stroke-linecap', 'round');
+            arm.appendChild(leftJaw);
+
+            // Right jaw (mirrored display: negate X like the arm segments)
+            let rightJaw = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            rightJaw.setAttribute('x1', endPos.x);
+            rightJaw.setAttribute('y1', endPos.y);
+            rightJaw.setAttribute('x2', endPos.x - gripperLength * Math.cos(orientRad - jawAngleRad));
+            rightJaw.setAttribute('y2', endPos.y - gripperLength * Math.sin(orientRad - jawAngleRad));
+            rightJaw.setAttribute('stroke', '#ffd93d');
+            rightJaw.setAttribute('stroke-width', gripperWidth);
+            rightJaw.setAttribute('stroke-linecap', 'round');
+            arm.appendChild(rightJaw);
+
+            // End effector center point
+            let endCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            endCircle.setAttribute('cx', endPos.x);
+            endCircle.setAttribute('cy', endPos.y);
+            endCircle.setAttribute('r', 12);
+            endCircle.classList.add('end-effector');
+            endCircle.id = 'end-effector';
+
+            if (isDragging || isRightDragging) {
+                endCircle.classList.add('dragging');
+            }
+
+            endCircle.onmousedown = (e) => {
+                e.preventDefault();
+                if (e.button === 2) { // Right click
+                    startRightDrag(e);
+                } else if (e.button === 0) { // Left click
+                    startDrag(e);
+                }
+            };
+            endCircle.onmouseenter = () => {
+                isHoveringGripper = true;
+            };
+            endCircle.onmouseleave = () => {
+                isHoveringGripper = false;
+            };
+            endCircle.oncontextmenu = (e) => e.preventDefault(); // Prevent context menu
+            arm.appendChild(endCircle);
+
+            // Update info
+            document.getElementById('end-pos').textContent =
+                `End: (${endPos.x.toFixed(0)}, ${endPos.y.toFixed(0)}) | Orient: ${totalOrientation.toFixed(1)}°`;
+        }
+
+        // Update joint angle
+        function updateAngle(index, value) {
+            // Apply joint limits
+            let limits = jointLimits[index] || {min: -180, max: 180};
+            angles[index] = Math.max(limits.min, Math.min(limits.max, parseFloat(value)));
+
+            document.getElementById('val-' + index).textContent = angles[index].toFixed(1) + '°';
+            document.getElementById('slider-' + index).value = angles[index];
+            document.getElementById('num-' + index).value = angles[index].toFixed(1);
+
+            // Send to WebSocket
+            sendWS('on_joint_update', {
+                jointIndex: index,
+                angleRad: angles[index] * Math.PI / 180
+            });
+
+            draw();
+        }
+
+        // Update gripper angle
+        function updateGripper(value) {
+            // Get min/max from slider (which is set by config)
+            let minVal = parseFloat(document.getElementById('gripper-slider').min) || 0;
+            let maxVal = parseFloat(document.getElementById('gripper-slider').max) || 90;
+
+            gripperAngle = Math.max(minVal, Math.min(maxVal, parseFloat(value)));
+            document.getElementById('gripper-val').textContent = gripperAngle.toFixed(0) + '°';
+            document.getElementById('gripper-slider').value = gripperAngle;
+            document.getElementById('gripper-num').value = gripperAngle;
+
+            // Send to WebSocket
+            sendWS('on_gripper_update', {
+                motorId: gripperMotorId,
+                angleRad: gripperAngle * Math.PI / 180
+            });
+
+            draw();
+        }
+
+        // Generate controls
+        function generateControls() {
+            let mappedDiv = document.getElementById('mapped-joints');
+            let unmappedDiv = document.getElementById('unmapped-joints');
+            mappedDiv.innerHTML = '';
+            unmappedDiv.innerHTML = '';
+
+            for (let i = 0; i < dof; i++) {
+                let isMapped = i in motorMapping;
+                let limits = jointLimits[i] || {min: -180, max: 180};
+                let div = document.createElement('div');
+                div.className = 'joint-control' + (isMapped ? '' : ' unmapped');
+                div.id = 'control-' + i;
+
+                div.innerHTML = `
+                    <label>Joint ${i + 1}</label>
+                    <div class="motor-info">${isMapped ? 'Motor: ' + motorMapping[i] : 'Manual only'}</div>
+                    <div class="motor-info" style="color: #999;">Limits: ${limits.min}° to ${limits.max}°</div>
+                    <input type="range" id="slider-${i}" min="${limits.min}" max="${limits.max}" value="0"
+                           oninput="updateAngle(${i}, this.value)">
+                    <input type="number" id="num-${i}" min="${limits.min}" max="${limits.max}" step="0.1" value="0"
+                           oninput="updateAngle(${i}, this.value)">
+                    <span class="value-display" id="val-${i}">0.0°</span>
+                `;
+
+                if (isMapped) {
+                    mappedDiv.appendChild(div);
+                } else {
+                    unmappedDiv.appendChild(div);
+                }
+            }
+        }
+
+        function highlightSelected() {
+            document.querySelectorAll('.joint-control').forEach(el => {
+                el.style.background = '#f5f5f5';
+            });
+            let selected = document.getElementById('control-' + selectedJoint);
+            if (selected) selected.style.background = '#ffe0e0';
+        }
+
+        // Drag for end effector IK (left click)
+        function startDrag(e) {
+            isDragging = true;
+            document.getElementById('status').textContent = 'IK Mode - Dragging End Effector';
+            draw();
+        }
+
+        // Right-click drag for end effector with fixed orientation
+        function startRightDrag(e) {
+            isRightDragging = true;
+            // Store current orientation to maintain it
+            targetOrientation = 0;
+            for (let i = 0; i < dof; i++) {
+                targetOrientation += angles[i];
+            }
+            document.getElementById('status').textContent = 'IK Mode - Fixed Orientation (Right-Drag)';
+            draw();
+        }
+
+        // Drag for joint repositioning
+        function startJointDrag(jointIndex) {
+            isDraggingJoint = true;
+            draggedJointIndex = jointIndex;
+            document.getElementById('status').textContent = `Dragging Joint ${jointIndex}`;
+            draw();
+        }
+
+        function onMouseMove(e) {
+            let svg = document.getElementById('svg');
+            let rect = svg.getBoundingClientRect();
+            let scaleX = svg.viewBox.baseVal.width / rect.width;
+            let scaleY = svg.viewBox.baseVal.height / rect.height;
+
+            let targetX = (e.clientX - rect.left) * scaleX;
+            let targetY = (e.clientY - rect.top) * scaleY;
+
+            if (isDragging) {
+                // Left-click: Normal IK drag
+                solveIK(targetX, targetY);
+                triggerAutoSend();
+            } else if (isRightDragging) {
+                // Right-click: IK with fixed orientation
+                solveIKFixedOrientation(targetX, targetY, targetOrientation);
+                triggerAutoSend();
+            } else if (isDraggingJoint) {
+                // Drag joint to reposition it
+                solveJointDrag(draggedJointIndex, targetX, targetY);
+                triggerAutoSend();
+            }
+        }
+
+        function stopDrag() {
+            if (isDragging) {
+                isDragging = false;
+                document.getElementById('status').textContent = wsConnected ? 'WS: Connected' : 'WS: Disconnected';
+                draw();
+            }
+            if (isRightDragging) {
+                isRightDragging = false;
+                document.getElementById('status').textContent = wsConnected ? 'WS: Connected' : 'WS: Disconnected';
+                draw();
+            }
+            if (isDraggingJoint) {
+                isDraggingJoint = false;
+                draggedJointIndex = -1;
+                document.getElementById('status').textContent = wsConnected ? 'WS: Connected' : 'WS: Disconnected';
+                draw();
+            }
+        }
+
+        // Solve joint drag - move specific joint to target position
+        function solveJointDrag(jointIndex, targetX, targetY) {
+            // Account for pan offset
+            let actualBaseX = baseX + panOffsetX;
+            let actualBaseY = baseY + panOffsetY;
+
+            // Convert to relative coordinates with mirrored X
+            let relX = -(targetX - actualBaseX);  // Negated for mirrored display
+            let relY = -(targetY - actualBaseY);
+
+            // We need to solve for the angle that places this joint at the target
+            // Only adjust angles up to and including the dragged joint
+            let originalAngles = [...angles];
+
+            // Calculate position of previous joint (parent)
+            let parentPos = {x: 0, y: 0};
+            let totalAngle = 0;
+            for (let i = 0; i < jointIndex - 1; i++) {
+                totalAngle += angles[i];
+                let rad = totalAngle * Math.PI / 180;
+                // Mirror X to match the flipped visualization
+                parentPos.x -= lengths[i] * Math.cos(rad);  // Negative for mirrored display
+                parentPos.y += lengths[i] * Math.sin(rad);
+            }
+
+            // Vector from parent to target
+            let dx = relX - parentPos.x;
+            let dy = relY - parentPos.y;
+            let targetAngle = Math.atan2(dy, dx) * 180 / Math.PI;
+
+            // Calculate what the angle should be
+            let desiredAngle = targetAngle - totalAngle;
+
+            // Apply joint limits
+            let limits = jointLimits[jointIndex - 1] || {min: -180, max: 180};
+            desiredAngle = Math.max(limits.min, Math.min(limits.max, desiredAngle));
+
+            // Update only the joint being dragged
+            angles[jointIndex - 1] = desiredAngle;
+
+            // Check for collision
+            if (collisionEnabled) {
+                let positions = getPositions();
+                if (checkSelfCollision(positions)) {
+                    // Revert if collision
+                    angles = [...originalAngles];
+                    return;
+                }
+            }
+
+            // Update UI
+            updateAngle(jointIndex - 1, angles[jointIndex - 1]);
+        }
+
+        // CCD IK solver - works for all DOF (2-6 joints)
+        function solveIK(targetX, targetY) {
+            // Convert target from canvas coordinates to relative coordinates
+            // Account for pan offset
+            let actualBaseX = baseX + panOffsetX;
+            let actualBaseY = baseY + panOffsetY;
+
+            // Convert to relative coordinates (robot frame)
+            // Mirror X because canvas shows 0° left but robot uses 0° right
+            let relX = -(targetX - actualBaseX);
+            let relY = -(targetY - actualBaseY);  // Also negate Y to flip vertical
+
+            let dist = Math.sqrt(relX * relX + relY * relY);
+            let totalReach = lengths.slice(0, dof).reduce((a, b) => a + b, 0);
+
+            // Check if target is reachable
+            if (dist > totalReach) {
+                console.log('Target out of reach:', dist, '>', totalReach);
+                return;
+            }
+
+            solveIKCCD(relX, relY);
+        }
+
+        // IK solver with fixed end effector orientation
+        function solveIKFixedOrientation(targetX, targetY, desiredOrientation) {
+            // Account for pan offset
+            let actualBaseX = baseX + panOffsetX;
+            let actualBaseY = baseY + panOffsetY;
+
+            // Convert to relative coordinates (robot frame)
+            // Mirror X because canvas shows 0° left but robot uses 0° right
+            let relX = -(targetX - actualBaseX);
+            let relY = -(targetY - actualBaseY);  // Also negate Y to flip vertical
+
+            let dist = Math.sqrt(relX * relX + relY * relY);
+            let totalReach = lengths.slice(0, dof).reduce((a, b) => a + b, 0);
+
+            if (dist > totalReach) {
+                console.log('Target out of reach:', dist, '>', totalReach);
+                return;
+            }
+
+            solveIKCCDFixedOrientation(relX, relY, desiredOrientation);
+        }
+
+        // CCD with fixed orientation - only adjusts first (dof-1) joints
+        function solveIKCCDFixedOrientation(relX, relY, desiredOrientation) {
+            const maxIterations = 10;
+            const tolerance = 2;
+            const damping = 0.5;
+
+            let originalAngles = [...angles];
+
+            for (let iter = 0; iter < maxIterations; iter++) {
+                let endPos = calcEndPos(angles);
+                let error = Math.sqrt((endPos.x - relX) ** 2 + (endPos.y - relY) ** 2);
+
+                if (error < tolerance) break;
+
+                // Work backwards but skip the last joint (to maintain orientation)
+                for (let i = dof - 2; i >= 0; i--) {
+                    endPos = calcEndPos(angles);
+
+                    let jointPos = {x: 0, y: 0};
+                    let totalAngle = 0;
+                    for (let j = 0; j < i; j++) {
+                        totalAngle += angles[j];
+                        let rad = totalAngle * Math.PI / 180;
+                        jointPos.x += lengths[j] * Math.cos(rad);
+                        jointPos.y += lengths[j] * Math.sin(rad);
+                    }
+
+                    let toEnd = {x: endPos.x - jointPos.x, y: endPos.y - jointPos.y};
+                    let toTarget = {x: relX - jointPos.x, y: relY - jointPos.y};
+
+                    let angleToEnd = Math.atan2(toEnd.y, toEnd.x) * 180 / Math.PI;
+                    let angleToTarget = Math.atan2(toTarget.y, toTarget.x) * 180 / Math.PI;
+
+                    let deltaAngle = angleToTarget - angleToEnd;
+
+                    while (deltaAngle > 180) deltaAngle -= 360;
+                    while (deltaAngle < -180) deltaAngle += 360;
+
+                    deltaAngle *= damping;
+
+                    let limits = jointLimits[i] || {min: -180, max: 180};
+                    let newAngle = angles[i] + deltaAngle;
+                    newAngle = Math.max(limits.min, Math.min(limits.max, newAngle));
+
+                    angles[i] = newAngle;
+                }
+
+                // Adjust last joint to maintain orientation
+                let currentOrientation = 0;
+                for (let i = 0; i < dof - 1; i++) {
+                    currentOrientation += angles[i];
+                }
+                let lastJointAngle = desiredOrientation - currentOrientation;
+
+                // Apply limits to last joint
+                let limits = jointLimits[dof - 1] || {min: -180, max: 180};
+                angles[dof - 1] = Math.max(limits.min, Math.min(limits.max, lastJointAngle));
+
+                // Check for collision
+                if (collisionEnabled) {
+                    let positions = getPositions();
+                    if (checkSelfCollision(positions)) {
+                        angles = [...originalAngles];
+                        console.log('IK stopped: collision would occur');
+                        break;
+                    }
+                }
+            }
+
+            // Update UI
+            for (let i = 0; i < dof; i++) {
+                updateAngle(i, angles[i]);
+            }
+        }
+
+        // CCD (Cyclic Coordinate Descent) for all DOF with collision avoidance
+        function solveIKCCD(relX, relY) {
+            const maxIterations = 10;
+            const tolerance = 2;
+            const damping = 0.5; // Smooth motion
+
+            // Store original angles in case we need to revert due to collision
+            let originalAngles = [...angles];
+
+            for (let iter = 0; iter < maxIterations; iter++) {
+                let endPos = calcEndPos(angles);
+                let error = Math.sqrt((endPos.x - relX) ** 2 + (endPos.y - relY) ** 2);
+
+                if (error < tolerance) break;
+
+                // Work backwards from last joint to first
+                for (let i = dof - 1; i >= 0; i--) {
+                    // Get current end effector position
+                    endPos = calcEndPos(angles);
+
+                    // Get joint position
+                    let jointPos = {x: 0, y: 0};
+                    let totalAngle = 0;
+                    for (let j = 0; j < i; j++) {
+                        totalAngle += angles[j];
+                        let rad = totalAngle * Math.PI / 180;
+                        jointPos.x += lengths[j] * Math.cos(rad);
+                        jointPos.y += lengths[j] * Math.sin(rad);
+                    }
+
+                    // Vector from joint to end effector
+                    let toEnd = {x: endPos.x - jointPos.x, y: endPos.y - jointPos.y};
+                    // Vector from joint to target
+                    let toTarget = {x: relX - jointPos.x, y: relY - jointPos.y};
+
+                    // Calculate angle between vectors
+                    let angleToEnd = Math.atan2(toEnd.y, toEnd.x) * 180 / Math.PI;
+                    let angleToTarget = Math.atan2(toTarget.y, toTarget.x) * 180 / Math.PI;
+
+                    // Calculate required rotation (with damping for smooth motion)
+                    let deltaAngle = angleToTarget - angleToEnd;
+
+                    // Normalize to -180 to 180
+                    while (deltaAngle > 180) deltaAngle -= 360;
+                    while (deltaAngle < -180) deltaAngle += 360;
+
+                    // Apply damping
+                    deltaAngle *= damping;
+
+                    // Update angle with joint limits
+                    let limits = jointLimits[i] || {min: -180, max: 180};
+                    let newAngle = angles[i] + deltaAngle;
+                    newAngle = Math.max(limits.min, Math.min(limits.max, newAngle));
+
+                    angles[i] = newAngle;
+                }
+
+                // Check for collision after each iteration
+                if (collisionEnabled) {
+                    let positions = getPositions();
+                    if (checkSelfCollision(positions)) {
+                        // Revert to original angles if collision detected
+                        angles = [...originalAngles];
+                        console.log('IK stopped: collision would occur');
+                        break;
+                    }
+                }
+            }
+
+            // Update UI with final angles
+            for (let i = 0; i < dof; i++) {
+                updateAngle(i, angles[i]);
+            }
+        }
+
+        // Calculate end effector position from angles (relative to base)
+        // Works in normal robot space (0° = right)
+        function calcEndPos(testAngles) {
+            let x = 0, y = 0;
+            let totalAngle = 0;
+
+            for (let i = 0; i < dof; i++) {
+                totalAngle += testAngles[i];
+                let rad = totalAngle * Math.PI / 180;
+                x += lengths[i] * Math.cos(rad);
+                y += lengths[i] * Math.sin(rad);
+            }
+
+            return {x, y};
+        }
+
+        function getPositions() {
+            let positions = [{x: baseX, y: baseY}];
+            let totalAngle = 0;
+            for (let i = 0; i < dof; i++) {
+                totalAngle += angles[i];
+                let rad = totalAngle * Math.PI / 180;
+                let prev = positions[i];
+                positions.push({
+                    x: prev.x + lengths[i] * Math.cos(rad),
+                    y: prev.y - lengths[i] * Math.sin(rad)
+                });
+            }
+            return positions;
+        }
+
+        // Actions
+        function updateDOF() {
+            let newDOF = parseInt(document.getElementById('dof').value);
+            if (newDOF >= 2 && newDOF <= 6) {
+                dof = newDOF;
+                angles = new Array(dof).fill(0);
+                lengths = Array.from({length: dof}, (_, i) => Math.max(120 - i * 15, 40));
+                generateControls();
+                draw();
+            }
+        }
+
+        function sendToMotors() {
+            let mappedAngles = {};
+
+            // Add all mapped joint angles
+            Object.entries(motorMapping).forEach(([jointIndex, motorId]) => {
+                let angleDeg = angles[jointIndex];
+                let angleRad = angleDeg * Math.PI / 180;
+                mappedAngles[motorId] = angleRad;
+                console.log(`[TRACE WEB] Joint ${jointIndex} -> Motor ${motorId}: ${angleDeg.toFixed(3)}° = ${angleRad.toFixed(6)} rad`);
+            });
+
+            // Add gripper angle
+            let gripperRad = gripperAngle * Math.PI / 180;
+            mappedAngles[gripperMotorId] = gripperRad;
+            console.log(`[TRACE WEB] Gripper -> Motor ${gripperMotorId}: ${gripperAngle.toFixed(3)}° = ${gripperRad.toFixed(6)} rad`);
+
+            sendWS('send_to_motors', { mappedAngles });
+            console.log('Sent to motors:\n' + JSON.stringify(mappedAngles, null, 2));
+        }
+
+        function toggleAutoSend() {
+            autoSendEnabled = document.getElementById('auto-send-check').checked;
+            if (autoSendEnabled) {
+                console.log('Auto-send enabled - motors will update while dragging');
+            } else {
+                console.log('Auto-send disabled');
+                // Clear any pending auto-send
+                if (autoSendThrottle) {
+                    clearTimeout(autoSendThrottle);
+                    autoSendThrottle = null;
+                }
+            }
+        }
+
+        function triggerAutoSend() {
+            if (!autoSendEnabled) return;
+
+            // Throttle auto-send to avoid overwhelming the motors
+            // Send at most once every 100ms
+            if (autoSendThrottle) {
+                clearTimeout(autoSendThrottle);
+            }
+
+            autoSendThrottle = setTimeout(() => {
+                sendToMotors();
+                autoSendThrottle = null;
+            }, 100);
+        }
+
+        function releaseAllMotors() {
+            // Emergency stop - disable all motors immediately
+            sendWS('disable_all_motors', {});
+            console.log('🛑 EMERGENCY: All motors disabled');
+            document.getElementById('status').textContent = '🛑 MOTORS RELEASED';
+            document.getElementById('status').style.background = 'rgba(255, 59, 59, 0.95)';
+            setTimeout(() => {
+                if (wsConnected) {
+                    document.getElementById('status').textContent = 'WS: Connected';
+                    document.getElementById('status').style.background = '';
+                }
+            }, 3000);
+        
+        }
+
+        // Event listeners
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', stopDrag);
+
+        // Mouse wheel to control gripper when hovering
+        document.addEventListener('wheel', (e) => {
+            if (isHoveringGripper) {
+                e.preventDefault();
+
+                // Get min/max from config
+                let minVal = parseFloat(document.getElementById('gripper-slider').min) || 0;
+                let maxVal = parseFloat(document.getElementById('gripper-slider').max) || 90;
+
+                // Scroll up = open, scroll down = close
+                // deltaY is positive when scrolling down, negative when scrolling up
+                let delta = -e.deltaY; // Invert so positive = open
+                let step = 5; // 5 degrees per scroll tick
+
+                if (delta > 0) {
+                    // Scroll up - open gripper
+                    updateGripper(Math.min(maxVal, gripperAngle + step));
+                } else if (delta < 0) {
+                    // Scroll down - close gripper
+                    updateGripper(Math.max(minVal, gripperAngle - step));
+                }
+            }
+        }, { passive: false });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key >= '1' && e.key <= '9') {
+                let joint = parseInt(e.key) - 1;
+                if (joint < dof) {
+                    selectedJoint = joint;
+                    highlightSelected();
+                    draw();
+                }
+            }
+
+            if (e.key === 'ArrowUp' || e.key === 'ArrowRight') {
+                e.preventDefault();
+                updateAngle(selectedJoint, angles[selectedJoint] + 1);
+            } else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') {
+                e.preventDefault();
+                updateAngle(selectedJoint, angles[selectedJoint] - 1);
+            }
+        });
+
+        // Pan and Zoom controls
+        const svg = document.getElementById('svg');
+
+        // Middle mouse button for panning
+        svg.addEventListener('mousedown', (e) => {
+            if (e.button === 1) { // Middle mouse button
+                e.preventDefault();
+                isPanning = true;
+                panStartX = e.clientX - panOffsetX;
+                panStartY = e.clientY - panOffsetY;
+                svg.style.cursor = 'grabbing';
+            }
+        });
+
+        svg.addEventListener('mousemove', (e) => {
+            if (isPanning) {
+                panOffsetX = e.clientX - panStartX;
+                panOffsetY = e.clientY - panStartY;
+                draw();
+            }
+        });
+
+        svg.addEventListener('mouseup', (e) => {
+            if (e.button === 1) {
+                isPanning = false;
+                svg.style.cursor = 'default';
+            }
+        });
+
+        // Mouse wheel disabled (zoom removed)
+
+        // Keyboard shortcuts for pan
+        document.addEventListener('keydown', (e) => {
+            const panSpeed = 10;
+            if (e.ctrlKey || e.metaKey) {
+                if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    panOffsetY += panSpeed;
+                    draw();
+                } else if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    panOffsetY -= panSpeed;
+                    draw();
+                } else if (e.key === 'ArrowLeft') {
+                    e.preventDefault();
+                    panOffsetX += panSpeed;
+                    draw();
+                } else if (e.key === 'ArrowRight') {
+                    e.preventDefault();
+                    panOffsetX -= panSpeed;
+                    draw();
+                } else if (e.key === '0') {
+                    e.preventDefault();
+                    // Reset pan
+                    panOffsetX = 0;
+                    panOffsetY = 0;
+                    draw();
+                }
+            }
+        });
+
+        // Initialize
+        console.log('Robot Arm Control starting...');
+        generateControls();
+        draw();
+        initWebSocket();
+        console.log('Ready! Pan: Middle-click+drag or Ctrl+Arrows | Reset: Ctrl+0');
+    </script>
+</body>
+</html>
